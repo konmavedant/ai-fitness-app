@@ -1,0 +1,7 @@
+{
+  "name": "Copy of AI Fitness Tracker",
+  "description": "A modern, responsive web application for an AI-powered fitness tracker designed for home workouts. It features real-time pose correction feedback, personalized workout plans, and progress tracking.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
