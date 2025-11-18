@@ -1,6 +1,8 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { MOCK_EXERCISES } from '../../constants';
 import { generateExerciseFeedback } from '../../services/geminiService';
+import { analyzePose } from '../../services/poseEstimationService';
 import { PlayIcon, PauseIcon, ListIcon, SparklesIcon } from '../icons/Icons';
 
 const WorkoutPage: React.FC = () => {
@@ -8,14 +10,14 @@ const WorkoutPage: React.FC = () => {
     const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
     const [reps, setReps] = useState(0);
     const [timer, setTimer] = useState(MOCK_EXERCISES[0].duration || 0);
-    const [feedback, setFeedback] = useState<{ type: 'good' | 'bad' | 'ai'; message: string } | null>(null);
+    const [feedback, setFeedback] = useState<{ type: 'good' | 'bad' | 'ai' | 'info'; message: string } | null>(null);
     const [isFetchingFeedback, setIsFetchingFeedback] = useState(false);
     const [showExerciseList, setShowExerciseList] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
     const [isTrackingReps, setIsTrackingReps] = useState(false);
-    const [isRepCooldown, setIsRepCooldown] = useState(false);
-    const timerRef = useRef<NodeJS.Timeout | null>(null);
-    const repTrackerRef = useRef<NodeJS.Timeout | null>(null);
+    
+    const timerRef = useRef<number | null>(null);
+    const poseDetectionFrameRef = useRef<number | null>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
 
     const currentExercise = MOCK_EXERCISES[currentExerciseIndex];
@@ -46,30 +48,6 @@ const WorkoutPage: React.FC = () => {
             timerRef.current = null;
         }
     }, []);
-
-    useEffect(() => {
-        if (isTrackingReps && currentExercise.reps > 0) {
-            repTrackerRef.current = setInterval(() => {
-                setReps(prevReps => {
-                    const newReps = prevReps + 1;
-                    if (newReps >= currentExercise.reps) {
-                        handleNextExercise();
-                        return 0;
-                    }
-                    setIsRepCooldown(true);
-                    setTimeout(() => setIsRepCooldown(false), 300);
-                    return newReps;
-                });
-            }, 2000); // Simulate one rep every 2 seconds
-        } else {
-            if (repTrackerRef.current) {
-                clearInterval(repTrackerRef.current);
-            }
-        }
-        return () => {
-            if (repTrackerRef.current) clearInterval(repTrackerRef.current);
-        };
-    }, [isTrackingReps, currentExercise.reps, handleNextExercise]);
 
     useEffect(() => {
         let stream: MediaStream | null = null;
@@ -128,6 +106,46 @@ const WorkoutPage: React.FC = () => {
         }
     }, [currentExercise, isWorkoutActive, startTimer, stopTimer]);
 
+    // Pose Estimation Loop
+    useEffect(() => {
+        const runPoseDetection = async () => {
+            if (videoRef.current && videoRef.current.readyState >= 3 && isTrackingReps) {
+                const result = await analyzePose(videoRef.current, currentExercise.name);
+
+                if (result.isRepCounted) {
+                    setReps(prevReps => {
+                        const newReps = prevReps + 1;
+                        if (newReps >= currentExercise.reps) {
+                            handleNextExercise();
+                            return 0;
+                        }
+                        return newReps;
+                    });
+                }
+
+                if (result.feedback) {
+                    const isGoodFeedback = result.feedback.toLowerCase().includes('good') || result.feedback.toLowerCase().includes('excellent') || result.feedback.toLowerCase().includes('solid');
+                    setFeedback({ type: isGoodFeedback ? 'good' : 'bad', message: result.feedback });
+                }
+
+                // Schedule next frame only if still tracking
+                poseDetectionFrameRef.current = requestAnimationFrame(runPoseDetection);
+            }
+        };
+
+        if (isTrackingReps && currentExercise.reps > 0) {
+            setFeedback({ type: 'info', message: 'AI Vision Active. Start your reps!' });
+            poseDetectionFrameRef.current = requestAnimationFrame(runPoseDetection);
+        } else {
+            if (poseDetectionFrameRef.current) {
+                cancelAnimationFrame(poseDetectionFrameRef.current);
+            }
+        }
+
+        return () => { if (poseDetectionFrameRef.current) cancelAnimationFrame(poseDetectionFrameRef.current) };
+    }, [isTrackingReps, currentExercise, handleNextExercise]);
+
+
     const handleToggleWorkout = () => setIsWorkoutActive(prev => !prev);
     
     const handleGetAIFeedback = async () => {
@@ -154,15 +172,27 @@ const WorkoutPage: React.FC = () => {
                             <p>{cameraError}</p>
                         </div>
                     ) : (
-                        <video
-                            ref={videoRef}
-                            autoPlay
-                            playsInline
-                            muted
-                            className="w-full h-full object-cover transform scaleX-[-1]"
-                        >
-                            Your browser does not support the video tag.
-                        </video>
+                        <>
+                            <video
+                                ref={videoRef}
+                                autoPlay
+                                playsInline
+                                muted
+                                className="w-full h-full object-cover transform scaleX-[-1]"
+                            >
+                                Your browser does not support the video tag.
+                            </video>
+                            {isTrackingReps && (
+                                <div className="absolute top-4 left-4 bg-red-600/90 backdrop-blur-sm text-white px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg animate-pulse">
+                                    <div className="w-2 h-2 bg-white rounded-full"></div>
+                                    AI VISION ACTIVE
+                                </div>
+                            )}
+                             {/* Pose Overlay Simulation */}
+                            {isTrackingReps && (
+                                <div className="absolute inset-0 pointer-events-none border-4 border-accent-blue/30 rounded-md"></div>
+                            )}
+                        </>
                     )}
                 </div>
                 <div className="flex items-center gap-4 mt-4 flex-wrap justify-center">
@@ -192,7 +222,7 @@ const WorkoutPage: React.FC = () => {
 
                         <div className="grid grid-cols-2 gap-4 mb-4">
                             {currentExercise.reps > 0 && (
-                                <div className={`bg-gray-100 dark:bg-dark-primary p-4 rounded-lg text-center transition-all duration-300 ${isRepCooldown ? 'ring-2 ring-accent-green' : ''}`}>
+                                <div className={`bg-gray-100 dark:bg-dark-primary p-4 rounded-lg text-center ${isTrackingReps ? 'ring-2 ring-accent-green' : ''}`}>
                                     <p className="text-sm text-gray-500 dark:text-gray-400">Reps</p>
                                     <p className="text-2xl font-bold text-gray-900 dark:text-white">{reps} / {currentExercise.reps}</p>
                                 </div>
@@ -205,8 +235,13 @@ const WorkoutPage: React.FC = () => {
                             )}
                         </div>
                         
-                        <h3 className="text-xl font-bold mb-2 text-gray-900 dark:text-white">AI Feedback</h3>
-                        <div className={`p-3 rounded-lg text-center text-white mb-2 min-h-[48px] flex items-center justify-center ${feedback?.type === 'ai' ? 'bg-blue-500' : feedback?.type === 'good' ? 'bg-accent-green' : 'bg-accent-red'}`}>
+                        <h3 className="text-xl font-bold mb-2 text-gray-900 dark:text-white">Live Feedback</h3>
+                        <div className={`p-3 rounded-lg text-center text-white mb-2 min-h-[48px] flex items-center justify-center transition-colors duration-300 ${
+                            feedback?.type === 'ai' ? 'bg-blue-500' 
+                            : feedback?.type === 'good' ? 'bg-accent-green' 
+                            : feedback?.type === 'bad' ? 'bg-accent-red' 
+                            : 'bg-gray-500'
+                        }`}>
                             {isFetchingFeedback ? 'Getting tip...' : feedback?.message ?? 'Click "Get AI Tip" for help.'}
                         </div>
                         <button onClick={handleGetAIFeedback} disabled={isFetchingFeedback} className="w-full flex justify-center items-center gap-2 bg-gray-700 hover:bg-gray-800 text-white font-bold py-2 px-4 rounded-lg mb-4 disabled:bg-gray-500">
