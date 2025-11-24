@@ -14,7 +14,7 @@ const WorkoutPage: React.FC = () => {
     const [isFetchingFeedback, setIsFetchingFeedback] = useState(false);
     const [showExerciseList, setShowExerciseList] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
-    const [debugError, setDebugError] = useState<string | null>(null); // New state for technical error details
+    const [debugError, setDebugError] = useState<string | null>(null);
     const [isTrackingReps, setIsTrackingReps] = useState(false);
     const [cameraPermissionGranted, setCameraPermissionGranted] = useState(false);
     
@@ -52,7 +52,7 @@ const WorkoutPage: React.FC = () => {
         }
     }, []);
 
-    const enableCamera = async () => {
+    const enableCamera = useCallback(async () => {
         setCameraError(null);
         setDebugError(null);
 
@@ -62,6 +62,11 @@ const WorkoutPage: React.FC = () => {
         }
 
         try {
+            // Stop any existing stream first to be safe
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(track => track.stop());
+            }
+
             // We use the simplest constraints possible to maximize compatibility
             const stream = await navigator.mediaDevices.getUserMedia({ video: true });
             streamRef.current = stream;
@@ -81,7 +86,7 @@ const WorkoutPage: React.FC = () => {
                 setDebugError(`${err.name}: ${err.message}`);
 
                 if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-                    setCameraError("Access Denied. If you are in an app, the app developer must grant Camera permissions to the WebView.");
+                    setCameraError("Access Denied. Please check your system settings or app permissions.");
                 } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
                     setCameraError("No camera found. The app may not have hardware access.");
                 } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
@@ -95,16 +100,23 @@ const WorkoutPage: React.FC = () => {
             }
             setCameraPermissionGranted(false);
         }
-    };
+    }, []);
 
     // Cleanup camera on unmount
     useEffect(() => {
         return () => {
             if (streamRef.current) {
                 streamRef.current.getTracks().forEach(track => track.stop());
+                streamRef.current = null;
             }
         };
     }, []);
+
+    // Automatically attempt to enable camera on mount
+    // This is required for many Android WebViews to trigger the permission prompt
+    useEffect(() => {
+        enableCamera();
+    }, [enableCamera]);
 
     useEffect(() => {
         if (isWorkoutActive) {
@@ -205,16 +217,19 @@ const WorkoutPage: React.FC = () => {
                         </div>
                     ) : !cameraPermissionGranted ? (
                         <div className="text-center p-4">
+                             {/* Loader while waiting for permission or auto-start */}
+                            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-accent-blue mx-auto mb-4"></div>
+                            <p className="text-gray-400 text-sm">Requesting camera access...</p>
+                            
                             <button 
                                 onClick={enableCamera}
-                                className="bg-accent-blue hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-full transition-transform transform hover:scale-105 shadow-lg flex items-center gap-2"
+                                className="mt-4 bg-accent-blue hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-full transition-transform transform hover:scale-105 shadow-lg flex items-center gap-2 mx-auto"
                             >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                                 </svg>
-                                <span>Enable Camera</span>
+                                <span>Enable Manually</span>
                             </button>
-                            <p className="text-gray-400 mt-2 text-sm">Click to start video for pose tracking</p>
                         </div>
                     ) : (
                         <>
