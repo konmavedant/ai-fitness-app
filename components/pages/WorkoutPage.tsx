@@ -14,6 +14,7 @@ const WorkoutPage: React.FC = () => {
     const [isFetchingFeedback, setIsFetchingFeedback] = useState(false);
     const [showExerciseList, setShowExerciseList] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
+    const [debugError, setDebugError] = useState<string | null>(null); // New state for technical error details
     const [isTrackingReps, setIsTrackingReps] = useState(false);
     const [cameraPermissionGranted, setCameraPermissionGranted] = useState(false);
     
@@ -53,13 +54,18 @@ const WorkoutPage: React.FC = () => {
 
     const enableCamera = async () => {
         setCameraError(null);
+        setDebugError(null);
+
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            setCameraError("Your browser does not support camera access.");
+            setCameraError("Your browser/app does not support camera access via web.");
             return;
         }
+
         try {
+            // We use the simplest constraints possible to maximize compatibility
             const stream = await navigator.mediaDevices.getUserMedia({ video: true });
             streamRef.current = stream;
+            
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
                 videoRef.current.onloadedmetadata = () => {
@@ -69,14 +75,23 @@ const WorkoutPage: React.FC = () => {
             setCameraPermissionGranted(true);
         } catch (err) {
             console.error("Error accessing camera:", err);
+            
+            // Detailed error handling for debugging WebViews
             if (err instanceof Error) {
+                setDebugError(`${err.name}: ${err.message}`);
+
                 if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-                    setCameraError("Camera access denied. Please go to your device settings -> Apps -> Your App -> Permissions and allow Camera access.");
+                    setCameraError("Access Denied. If you are in an app, the app developer must grant Camera permissions to the WebView.");
+                } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+                    setCameraError("No camera found. The app may not have hardware access.");
+                } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
+                    setCameraError("Camera is currently in use by another application.");
                 } else {
-                    setCameraError("Could not access camera. Is it being used by another app?");
+                    setCameraError("Could not access camera.");
                 }
             } else {
                 setCameraError("An unknown error occurred while accessing the camera.");
+                setDebugError(JSON.stringify(err));
             }
             setCameraPermissionGranted(false);
         }
@@ -175,7 +190,12 @@ const WorkoutPage: React.FC = () => {
                     {cameraError ? (
                         <div className="text-center text-red-400 p-4 max-w-md">
                             <p className="font-semibold text-lg mb-2">Camera Error</p>
-                            <p className="mb-4">{cameraError}</p>
+                            <p className="mb-2">{cameraError}</p>
+                            {debugError && (
+                                <p className="mb-4 text-xs font-mono bg-black/30 p-2 rounded text-gray-300">
+                                    Debug Info: {debugError}
+                                </p>
+                            )}
                             <button 
                                 onClick={enableCamera}
                                 className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-full transition-colors"
