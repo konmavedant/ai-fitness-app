@@ -15,10 +15,12 @@ const WorkoutPage: React.FC = () => {
     const [showExerciseList, setShowExerciseList] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
     const [isTrackingReps, setIsTrackingReps] = useState(false);
+    const [cameraPermissionGranted, setCameraPermissionGranted] = useState(false);
     
     const timerRef = useRef<number | null>(null);
     const poseDetectionFrameRef = useRef<number | null>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
+    const streamRef = useRef<MediaStream | null>(null);
 
     const currentExercise = MOCK_EXERCISES[currentExerciseIndex];
 
@@ -49,39 +51,42 @@ const WorkoutPage: React.FC = () => {
         }
     }, []);
 
-    useEffect(() => {
-        let stream: MediaStream | null = null;
-        const setupCamera = async () => {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                setCameraError("Your browser does not support camera access.");
-                return;
+    const enableCamera = async () => {
+        setCameraError(null);
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            setCameraError("Your browser does not support camera access.");
+            return;
+        }
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            streamRef.current = stream;
+            if (videoRef.current) {
+                videoRef.current.srcObject = stream;
+                videoRef.current.onloadedmetadata = () => {
+                    console.log('Pose estimation data can be processed from this video stream.');
+                };
             }
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                if (videoRef.current) {
-                    videoRef.current.srcObject = stream;
-                    videoRef.current.onloadedmetadata = () => {
-                        console.log('Pose estimation data can be processed from this video stream.');
-                    };
-                }
-            } catch (err) {
-                console.error("Error accessing camera:", err);
-                if (err instanceof Error) {
-                    if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-                        setCameraError("Camera access denied. Please enable it in your browser settings to use this feature.");
-                    } else {
-                        setCameraError("Could not access camera. Is it being used by another app?");
-                    }
+            setCameraPermissionGranted(true);
+        } catch (err) {
+            console.error("Error accessing camera:", err);
+            if (err instanceof Error) {
+                if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+                    setCameraError("Camera access denied. Please go to your device settings -> Apps -> Your App -> Permissions and allow Camera access.");
                 } else {
-                    setCameraError("An unknown error occurred while accessing the camera.");
+                    setCameraError("Could not access camera. Is it being used by another app?");
                 }
+            } else {
+                setCameraError("An unknown error occurred while accessing the camera.");
             }
-        };
-        setupCamera();
-        
+            setCameraPermissionGranted(false);
+        }
+    };
+
+    // Cleanup camera on unmount
+    useEffect(() => {
         return () => {
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
+            if (streamRef.current) {
+                streamRef.current.getTracks().forEach(track => track.stop());
             }
         };
     }, []);
@@ -163,13 +168,33 @@ const WorkoutPage: React.FC = () => {
     };
 
     return (
-        <div className="container mx-auto p-4 md:p-8 flex flex-col lg:flex-row gap-8">
-            <div className="flex-grow lg:w-2/3 bg-dark-card rounded-lg shadow-xl flex flex-col items-center justify-center p-4">
-                <div className="w-full h-full min-h-[480px] bg-black rounded-md flex items-center justify-center relative overflow-hidden">
+        <div className="container mx-auto p-4 md:p-8 flex flex-col gap-8">
+            {/* Video Section */}
+            <div className="w-full bg-dark-card rounded-lg shadow-xl flex flex-col items-center justify-center p-4">
+                <div className="w-full aspect-video bg-black rounded-md flex items-center justify-center relative overflow-hidden max-h-[70vh]">
                     {cameraError ? (
-                        <div className="text-center text-red-400 p-4">
-                            <p className="font-semibold">Camera Error</p>
-                            <p>{cameraError}</p>
+                        <div className="text-center text-red-400 p-4 max-w-md">
+                            <p className="font-semibold text-lg mb-2">Camera Error</p>
+                            <p className="mb-4">{cameraError}</p>
+                            <button 
+                                onClick={enableCamera}
+                                className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-full transition-colors"
+                            >
+                                Retry Camera
+                            </button>
+                        </div>
+                    ) : !cameraPermissionGranted ? (
+                        <div className="text-center p-4">
+                            <button 
+                                onClick={enableCamera}
+                                className="bg-accent-blue hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-full transition-transform transform hover:scale-105 shadow-lg flex items-center gap-2"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                                <span>Enable Camera</span>
+                            </button>
+                            <p className="text-gray-400 mt-2 text-sm">Click to start video for pose tracking</p>
                         </div>
                     ) : (
                         <>
@@ -195,81 +220,130 @@ const WorkoutPage: React.FC = () => {
                         </>
                     )}
                 </div>
-                <div className="flex items-center gap-4 mt-4 flex-wrap justify-center">
-                    <button onClick={handleToggleWorkout} className="flex items-center gap-2 bg-accent-blue hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-full transition-colors" aria-label={isWorkoutActive ? "Pause workout" : "Start workout"}>
+                
+                {/* Controls Bar */}
+                <div className="flex items-center gap-4 mt-4 flex-wrap justify-center w-full">
+                    <button onClick={handleToggleWorkout} className="flex items-center gap-2 bg-accent-blue hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-full transition-colors shadow-lg" aria-label={isWorkoutActive ? "Pause workout" : "Start workout"}>
                         {isWorkoutActive ? <PauseIcon className="h-6 w-6"/> : <PlayIcon className="h-6 w-6"/>}
                         <span>{isWorkoutActive ? 'Pause' : 'Start'}</span>
                     </button>
                     {currentExercise.reps > 0 && (
-                         <button onClick={() => setIsTrackingReps(prev => !prev)} className={`flex items-center gap-2 text-white font-bold py-3 px-6 rounded-full transition-colors ${isTrackingReps ? 'bg-accent-red hover:bg-red-700' : 'bg-accent-green hover:bg-green-700'}`} aria-label="Track Reps">
+                         <button 
+                            onClick={() => {
+                                if (!cameraPermissionGranted) {
+                                    enableCamera();
+                                } else {
+                                    setIsTrackingReps(prev => !prev);
+                                }
+                            }} 
+                            className={`flex items-center gap-2 text-white font-bold py-3 px-8 rounded-full transition-colors shadow-lg ${!cameraPermissionGranted ? 'bg-gray-600 hover:bg-gray-700' : isTrackingReps ? 'bg-accent-red hover:bg-red-700' : 'bg-accent-green hover:bg-green-700'}`} 
+                            aria-label="Track Reps"
+                        >
                             <span>{isTrackingReps ? 'Stop Tracking' : 'Track Reps'}</span>
                         </button>
                     )}
-                    <button onClick={() => setShowExerciseList(prev => !prev)} className="flex lg:hidden items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-full transition-colors" aria-label="Toggle exercise list">
+                    <button onClick={() => setShowExerciseList(prev => !prev)} className="flex items-center gap-2 bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-full transition-colors shadow-lg" aria-label="Toggle exercise list">
                         <ListIcon className="h-6 w-6"/>
-                        <span>{showExerciseList ? 'Show Status' : 'Show List'}</span>
+                        <span>{showExerciseList ? 'Hide List' : 'Workout List'}</span>
                     </button>
                 </div>
             </div>
 
-            <div className={`w-full lg:w-1/3`}>
-                <div className="bg-white dark:bg-dark-card rounded-lg shadow-xl p-6 h-full flex flex-col">
-                    <div className={`${showExerciseList ? 'hidden' : 'block'} lg:block`}>
-                        <h2 className="text-2xl font-bold mb-4 text-gray-900 dark:text-white">Current Exercise</h2>
-                        <div className="text-center p-6 bg-gray-100 dark:bg-dark-primary rounded-lg mb-4">
-                            <p className="text-3xl font-bold text-accent-blue">{currentExercise.name}</p>
+            {/* Dashboard Panel (Replaces Sidebar) */}
+            <div className="w-full">
+                <div className="bg-white dark:bg-dark-card rounded-lg shadow-xl p-6 min-h-[200px] transition-all duration-300">
+                    {showExerciseList ? (
+                        <div className="animate-fade-in">
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Workout Plan</h2>
+                                <button onClick={() => setShowExerciseList(false)} className="text-sm text-accent-blue hover:underline">Back to Dashboard</button>
+                            </div>
+                            <ul className="space-y-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {MOCK_EXERCISES.map((ex, index) => (
+                                    <li key={index} className={`p-4 rounded-lg cursor-pointer border-2 ${index === currentExerciseIndex ? 'border-accent-blue bg-blue-50 dark:bg-blue-900/20' : 'border-transparent bg-gray-100 dark:bg-dark-primary hover:bg-gray-200 dark:hover:bg-gray-700'}`} onClick={() => { setCurrentExerciseIndex(index); setShowExerciseList(false); }}>
+                                        <div className="flex justify-between items-center">
+                                            <span className="font-bold text-gray-900 dark:text-white">{ex.name}</span>
+                                            <span className="text-sm bg-white dark:bg-dark-card px-2 py-1 rounded shadow-sm text-gray-600 dark:text-gray-300">{ex.reps ? `${ex.reps} reps` : `${ex.duration}s`}</span>
+                                        </div>
+                                    </li>
+                                ))}
+                            </ul>
                         </div>
-
-                        <div className="grid grid-cols-2 gap-4 mb-4">
-                            {currentExercise.reps > 0 && (
-                                <div className={`bg-gray-100 dark:bg-dark-primary p-4 rounded-lg text-center ${isTrackingReps ? 'ring-2 ring-accent-green' : ''}`}>
-                                    <p className="text-sm text-gray-500 dark:text-gray-400">Reps</p>
-                                    <p className="text-2xl font-bold text-gray-900 dark:text-white">{reps} / {currentExercise.reps}</p>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-fade-in">
+                            {/* Column 1: Stats & Info */}
+                            <div className="flex flex-col justify-between bg-gray-50 dark:bg-dark-primary p-6 rounded-lg shadow-inner">
+                                <div className="flex justify-between items-start mb-4">
+                                    <div>
+                                        <p className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Current Exercise</p>
+                                        <h2 className="text-3xl font-extrabold text-gray-900 dark:text-white leading-tight">{currentExercise.name}</h2>
+                                    </div>
+                                    <div className="bg-white dark:bg-dark-card p-2 rounded-full shadow-sm">
+                                        <DumbbellIcon className="h-6 w-6 text-accent-blue" />
+                                    </div>
                                 </div>
-                            )}
-                             {currentExercise.duration && (
-                                <div className="bg-gray-100 dark:bg-dark-primary p-4 rounded-lg text-center col-span-2">
-                                    <p className="text-sm text-gray-500 dark:text-gray-400">Time</p>
-                                    <p className="text-4xl font-mono font-bold text-gray-900 dark:text-white">{formatTime(timer)}</p>
+                                <div className="mt-auto">
+                                    {currentExercise.reps > 0 ? (
+                                        <div className="flex items-baseline gap-2">
+                                            <span className="text-5xl font-extrabold text-accent-blue">{reps}</span>
+                                            <span className="text-xl text-gray-500 dark:text-gray-400 font-medium">/ {currentExercise.reps} reps</span>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-baseline gap-2">
+                                            <span className="text-5xl font-extrabold text-accent-blue font-mono">{formatTime(timer)}</span>
+                                            <span className="text-xl text-gray-500 dark:text-gray-400 font-medium">seconds</span>
+                                        </div>
+                                    )}
                                 </div>
-                            )}
-                        </div>
-                        
-                        <h3 className="text-xl font-bold mb-2 text-gray-900 dark:text-white">Live Feedback</h3>
-                        <div className={`p-3 rounded-lg text-center text-white mb-2 min-h-[48px] flex items-center justify-center transition-colors duration-300 ${
-                            feedback?.type === 'ai' ? 'bg-blue-500' 
-                            : feedback?.type === 'good' ? 'bg-accent-green' 
-                            : feedback?.type === 'bad' ? 'bg-accent-red' 
-                            : 'bg-gray-500'
-                        }`}>
-                            {isFetchingFeedback ? 'Getting tip...' : feedback?.message ?? 'Click "Get AI Tip" for help.'}
-                        </div>
-                        <button onClick={handleGetAIFeedback} disabled={isFetchingFeedback} className="w-full flex justify-center items-center gap-2 bg-gray-700 hover:bg-gray-800 text-white font-bold py-2 px-4 rounded-lg mb-4 disabled:bg-gray-500">
-                           <SparklesIcon className="h-5 w-5"/> Get AI Tip
-                        </button>
-                    </div>
+                            </div>
 
-                    <div className={`${showExerciseList ? 'block' : 'hidden'} lg:hidden`}>
-                        <h2 className="text-2xl font-bold mb-4 text-gray-900 dark:text-white">Workout List</h2>
-                        <ul className="space-y-2">
-                            {MOCK_EXERCISES.map((ex, index) => (
-                                <li key={index} className={`p-3 rounded-lg cursor-pointer ${index === currentExerciseIndex ? 'bg-accent-blue text-white' : 'bg-gray-100 dark:bg-dark-primary'}`} onClick={() => setCurrentExerciseIndex(index)}>
-                                    <span className="font-semibold">{ex.name}</span>
-                                    <span className="text-sm ml-2">{ex.reps ? `${ex.reps} reps` : `${ex.duration}s`}</span>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
+                            {/* Column 2: Feedback Display */}
+                            <div className="flex flex-col bg-gray-50 dark:bg-dark-primary p-6 rounded-lg shadow-inner relative overflow-hidden">
+                                <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3 text-center">AI Feedback</h3>
+                                <div className={`flex-grow flex items-center justify-center p-4 rounded-lg text-center text-white transition-all duration-500 shadow-md transform ${
+                                    feedback?.type === 'ai' ? 'bg-blue-600 scale-100' 
+                                    : feedback?.type === 'good' ? 'bg-accent-green scale-100' 
+                                    : feedback?.type === 'bad' ? 'bg-accent-red scale-100' 
+                                    : 'bg-gray-400 dark:bg-gray-600'
+                                }`}>
+                                    <p className="text-lg font-bold">
+                                        {isFetchingFeedback ? 'Analyzing form...' : feedback?.message ?? 'Start moving for real-time feedback'}
+                                    </p>
+                                </div>
+                            </div>
 
-                    <div className="mt-auto pt-4">
-                        <button onClick={handleNextExercise} className="w-full bg-gray-700 hover:bg-gray-800 text-white font-bold py-2 px-4 rounded-lg">
-                            Next Exercise &rarr;
-                        </button>
-                    </div>
+                            {/* Column 3: Actions */}
+                            <div className="flex flex-col gap-4 justify-center">
+                                <button onClick={handleGetAIFeedback} disabled={isFetchingFeedback} className="w-full flex justify-center items-center gap-3 bg-gray-700 hover:bg-gray-800 text-white font-bold py-4 px-6 rounded-lg disabled:bg-gray-500 transition-all hover:shadow-lg transform hover:-translate-y-1">
+                                   <SparklesIcon className="h-6 w-6 text-yellow-300"/> 
+                                   <span>Get AI Form Tip</span>
+                                </button>
+                                <button onClick={handleNextExercise} className="w-full bg-white dark:bg-dark-primary hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-white border-2 border-gray-200 dark:border-gray-600 font-bold py-4 px-6 rounded-lg transition-all hover:shadow-lg transform hover:-translate-y-1 flex justify-center items-center gap-2">
+                                    <span>Next Exercise</span>
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
     );
 };
+
+// Icon helper specifically for this component if not imported, 
+// though imports are present. DumbbellIcon usage was added in design.
+const DumbbellIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M14.4 14.4 9.6 9.6M18 6l-1.4-1.4M6 18l-1.4-1.4M21 21 3 3"/>
+        <path d="M14.4 9.6 9.6 14.4"/>
+        <path d="M18 10h1a3 3 0 0 1 3 3v0a3 3 0 0 1-3 3h-1"/>
+        <path d="m5 11-2 2a3 3 0 0 0 0 4.2l2 2"/>
+        <path d="m19 13-2-2a3 3 0 0 0-4.2 0l-2 2"/>
+        <path d="M6 14H5a3 3 0 0 1-3-3v0a3 3 0 0 1 3-3h1"/>
+    </svg>
+);
 
 export default WorkoutPage;
