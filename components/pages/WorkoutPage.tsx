@@ -210,10 +210,10 @@ const WorkoutPage: React.FC = () => {
     };
 
     return (
-        <div className="container mx-auto p-4 md:p-8 flex flex-col gap-8">
+        <div className="container mx-auto p-0 md:p-8 flex flex-col gap-4 md:gap-8">
             {/* Video Section */}
-            <div className="w-full bg-dark-card rounded-lg shadow-xl flex flex-col items-center justify-center p-4">
-                <div className="w-full aspect-video bg-black rounded-md flex items-center justify-center relative overflow-hidden max-h-[70vh]">
+            <div className="w-full bg-dark-card md:rounded-lg md:shadow-xl flex flex-col items-center justify-center p-0 md:p-4">
+                <div className="w-full h-[65vh] md:h-auto md:aspect-video bg-black md:rounded-md flex items-center justify-center relative overflow-hidden">
                     {cameraError ? (
                         <div className="text-center text-red-400 p-4 max-w-md">
                             <p className="font-semibold text-lg mb-2">Camera Error</p>
@@ -273,7 +273,7 @@ const WorkoutPage: React.FC = () => {
                 </div>
                 
                 {/* Controls Bar */}
-                <div className="flex items-center gap-4 mt-4 flex-wrap justify-center w-full">
+                <div className="flex items-center gap-4 py-4 flex-wrap justify-center w-full px-2">
                     <button onClick={handleToggleWorkout} className="flex items-center gap-2 bg-accent-blue hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-full transition-colors shadow-lg" aria-label={isWorkoutActive ? "Pause workout" : "Start workout"}>
                         {isWorkoutActive ? <PauseIcon className="h-6 w-6"/> : <PlayIcon className="h-6 w-6"/>}
                         <span>{isWorkoutActive ? 'Pause' : 'Start'}</span>
@@ -301,7 +301,7 @@ const WorkoutPage: React.FC = () => {
             </div>
 
             {/* Dashboard Panel (Replaces Sidebar) */}
-            <div className="w-full">
+            <div className="w-full px-4 md:px-0 mb-8">
                 <div className="bg-white dark:bg-dark-card rounded-lg shadow-xl p-6 min-h-[200px] transition-all duration-300">
                     {showExerciseList ? (
                         <div className="animate-fade-in">
