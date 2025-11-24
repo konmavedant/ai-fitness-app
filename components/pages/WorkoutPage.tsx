@@ -56,32 +56,33 @@ const WorkoutPage: React.FC = () => {
         setCameraError(null);
         setDebugError(null);
 
+        // Check if we already have an active stream to avoid double requesting
+        if (streamRef.current && streamRef.current.active) {
+             setCameraPermissionGranted(true);
+             return;
+        }
+
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             setCameraError("Your browser/app does not support camera access via web.");
             return;
         }
 
         try {
-            // Stop any existing stream first to be safe
+            // Stop any existing stream first
             if (streamRef.current) {
                 streamRef.current.getTracks().forEach(track => track.stop());
             }
 
-            // We use the simplest constraints possible to maximize compatibility
             const stream = await navigator.mediaDevices.getUserMedia({ video: true });
             streamRef.current = stream;
             
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-                videoRef.current.onloadedmetadata = () => {
-                    console.log('Pose estimation data can be processed from this video stream.');
-                };
-            }
+            // IMPORTANT: We do NOT attach to videoRef here because videoRef.current is likely null
+            // (the video tag is not rendered yet). We only update state here.
+            
             setCameraPermissionGranted(true);
         } catch (err) {
             console.error("Error accessing camera:", err);
             
-            // Detailed error handling for debugging WebViews
             if (err instanceof Error) {
                 setDebugError(`${err.name}: ${err.message}`);
 
@@ -102,6 +103,20 @@ const WorkoutPage: React.FC = () => {
         }
     }, []);
 
+    // NEW EFFECT: Attach stream to video element when it becomes available
+    useEffect(() => {
+        if (cameraPermissionGranted && videoRef.current && streamRef.current) {
+            const videoEl = videoRef.current;
+            videoEl.srcObject = streamRef.current;
+            
+            // Explicitly call play to ensure it starts in WebViews
+            videoEl.play().catch(e => {
+                console.error("Video play failed:", e);
+                setDebugError(`Play failed: ${e.message}`);
+            });
+        }
+    }, [cameraPermissionGranted]);
+
     // Cleanup camera on unmount
     useEffect(() => {
         return () => {
@@ -112,8 +127,6 @@ const WorkoutPage: React.FC = () => {
         };
     }, []);
 
-    // Automatically attempt to enable camera on mount
-    // This is required for many Android WebViews to trigger the permission prompt
     useEffect(() => {
         enableCamera();
     }, [enableCamera]);
@@ -141,7 +154,7 @@ const WorkoutPage: React.FC = () => {
     // Pose Estimation Loop
     useEffect(() => {
         const runPoseDetection = async () => {
-            if (videoRef.current && videoRef.current.readyState >= 3 && isTrackingReps) {
+            if (videoRef.current && videoRef.current.readyState >= 2 && isTrackingReps) { // readyState 2 = HAVE_CURRENT_DATA
                 const result = await analyzePose(videoRef.current, currentExercise.name);
 
                 if (result.isRepCounted) {
@@ -160,8 +173,10 @@ const WorkoutPage: React.FC = () => {
                     setFeedback({ type: isGoodFeedback ? 'good' : 'bad', message: result.feedback });
                 }
 
-                // Schedule next frame only if still tracking
                 poseDetectionFrameRef.current = requestAnimationFrame(runPoseDetection);
+            } else if (isTrackingReps) {
+                 // Retry if video not ready yet
+                 poseDetectionFrameRef.current = requestAnimationFrame(runPoseDetection);
             }
         };
 
@@ -220,6 +235,7 @@ const WorkoutPage: React.FC = () => {
                              {/* Loader while waiting for permission or auto-start */}
                             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-accent-blue mx-auto mb-4"></div>
                             <p className="text-gray-400 text-sm">Requesting camera access...</p>
+                            <p className="text-xs text-gray-500 mt-2">Please allow permissions if prompted.</p>
                             
                             <button 
                                 onClick={enableCamera}
